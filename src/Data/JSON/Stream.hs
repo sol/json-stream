@@ -22,18 +22,17 @@ data Event
 parseValue :: Parser
 parseValue = go
   where
-    go input = case B.uncons input of
-      Nothing -> Just ([], input)
-      Just (x, xs) -> do
-        let cont
-              | x == ord '{' = parseObject xs
-              | x == ord '[' = parseArray xs
-              | x == ord '"' = parseString xs
-              | x == ord 'n' = parseNull xs
-              | x == ord 't' = parseTrue xs
-              | x == ord 'f' = parseFalse xs
-              | otherwise = parseNumber input
-        cont
+    go input = do
+      (x, xs) <- B.uncons input
+      let cont
+            | x == ord '{' = parseObject xs
+            | x == ord '[' = parseArray xs
+            | x == ord '"' = parseString xs
+            | x == ord 't' = parseTrue xs
+            | x == ord 'f' = parseFalse xs
+            | x == ord 'n' = parseNull xs
+            | otherwise = parseNumber input
+      cont
 
 type Parser = ByteString -> Maybe ([Event], ByteString)
 type ValueParser = ByteString -> Maybe (Event, ByteString)
