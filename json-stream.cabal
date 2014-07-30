@@ -9,11 +9,20 @@ build-type:       Simple
 category:         JSON
 cabal-version:    >= 1.10
 
+source-repository head
+  type: git
+  location: https://github.com/zalora/json-stream
+
 library
   ghc-options:
       -Wall
   hs-source-dirs:
       src
+  exposed-modules:
+      Data.JSON.Stream
+  build-depends:
+      base == 4.*
+    , bytestring
   default-language: Haskell2010
 
 test-suite spec
@@ -27,6 +36,7 @@ test-suite spec
       Spec.hs
   build-depends:
       base == 4.*
+    , bytestring
     , json-stream
     , hspec >= 1.5
   default-language: Haskell2010
