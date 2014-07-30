@@ -97,7 +97,7 @@ parseObject = fmap (mapFst (ObjectBegin :)) . go
                       | z == ord '}' = return (name : value ++ [ObjectEnd], zs)
                       | otherwise = Nothing
                 cont_
-            | otherwise = error (show xs)
+            | otherwise = Nothing
       cont
 
     parseName :: ValueParser
