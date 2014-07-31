@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Data.JSON.Stream (parseValue) where
+module Data.JSON.Stream (parseValue, decode, decodeValue) where
 
 import           Control.Applicative
 import           Numeric (readHex)
@@ -15,137 +15,204 @@ import           Data.Text.Encoding (encodeUtf8, decodeUtf8')
 import           Data.Aeson (Value(..), toJSON, object, (.=))
 import           Data.Aeson.Types (Pair)
 
-type Parser a = ByteString -> Maybe (a, ByteString)
+data Result a = OK !a ByteString
+              | Failed
+  deriving (Eq, Show)
+
+result :: b -> (a -> b) -> Result a -> b
+result def _ Failed   = def
+result _   f (OK x s) = f x
+
+newtype Parser a = Parser
+  { runParser :: ByteString -> Result a }
+
+failP :: Parser a
+failP = Parser $ \_ -> Failed
+
+decodeValue :: ByteString -> Maybe Value
+decodeValue = decode parseValue
+
+decode :: Parser a -> ByteString -> Maybe a
+decode p = result Nothing Just
+         . runParser p
+
+instance Functor Parser where
+  fmap f p = Parser $ \str ->
+    case runParser p str of
+      Failed    -> Failed
+      OK a str' -> OK (f a) str'
+
+instance Applicative Parser where
+  pure x = Parser $ OK x
+
+  f <*> x = Parser $ \str ->
+    case runParser f str of -- we run the parser for f
+      Failed    -> Failed
+      OK g str' ->
+        case runParser x str' of -- we run the parser for x
+          Failed     -> Failed
+          OK a str'' -> OK (g a) str'' -- and apply the function
+
+instance Monad Parser where
+  return = pure
+
+  x >>= f = Parser $ \str ->
+    case runParser x str of
+      Failed    -> Failed
+      OK a str' -> runParser (f a) str'
+
+nextWord :: Parser Word8
+nextWord = Parser $ \str ->
+  case B.uncons str of
+    Nothing        -> Failed
+    Just (c, str') -> OK c str'
+
+splitAtP :: Int -> Parser ByteString
+splitAtP n = Parser $ \str ->
+  case B.splitAt n str of
+    (s, str') -> OK s str'
+
+breakP :: (Word8 -> Bool) -> Parser ByteString
+breakP p = Parser $ \input ->
+  case B.break p input of
+    (str, rest) -> OK str rest
+
+spanP :: (Word8 -> Bool) -> Parser ByteString
+spanP p = Parser $ \input ->
+  case B.span p input of
+    (str, rest) -> OK str rest
 
 parseValue :: Parser Value
-parseValue = go
-  where
-    go input = do
-      (x, xs) <- B.uncons input
-      let cont
-            | x == ord '{' = parseObject xs
-            | x == ord '[' = parseArray xs
-            | x == ord '"' = parseString xs
-            | x == ord 't' = parseTrue xs
-            | x == ord 'f' = parseFalse xs
-            | x == ord 'n' = parseNull xs
-            | otherwise = parseNumber input
-      cont
+parseValue = Parser $ \str ->
+  case runParser nextWord str of
+    OK x str'
+        | x == ord '{' -> runParser parseObject str'
+        | x == ord '[' -> runParser parseArray str'
+        | x == ord '"' -> runParser parseString str'
+        | x == ord 't' -> runParser parseTrue str'
+        | x == ord 'f' -> runParser parseFalse str'
+        | x == ord 'n' -> runParser parseNull str'
+        -- here we run the parser on the original bs we got
+        -- because we don't want to miss the first digit
+        | otherwise    -> runParser parseNumber str
+    Failed -> Failed
 
 parseNull :: Parser Value
-parseNull input = case B.splitAt 3 input of
-  ("ull", rest) -> Just (Null, rest)
-  _ -> Nothing
+parseNull = do
+  s <- splitAtP 3
+  case s of
+    "ull" -> return Null
+    _     -> failP
 
 parseTrue :: Parser Value
-parseTrue input = case B.splitAt 3 input of
-  ("rue", rest) -> Just (Bool True, rest)
-  _ -> Nothing
+parseTrue = do
+  s <- splitAtP 3
+  case s of
+    "rue" -> return (Bool True)
+    _     -> failP
 
 parseFalse :: Parser Value
-parseFalse input = case B.splitAt 4 input of
-  ("alse", rest) -> Just (Bool False, rest)
-  _ -> Nothing
+parseFalse = do
+  s <- splitAtP 4
+  case s of
+    "alse" -> return (Bool False)
+    _      -> failP
 
 parseString :: Parser Value
-parseString = fmap (mapFst String) . parseStringLit
+parseString = fmap String parseStringLit
 
 parseStringLit :: Parser Text
-parseStringLit input = do
-  (str, rest) <- parseStringLit_ input
-  str_ <- (either (const Nothing) Just . decodeUtf8' . B.concat) str
-  return (str_, rest)
+parseStringLit = parseStringLit_ >>= convertToText
+  where
+    convertToText :: [ByteString] -> Parser Text
+    convertToText =
+      -- if bytestring -> utf8 fails, the parser fails
+        either (const failP) return
+      . decodeUtf8'
+      . B.concat
 
 parseStringLit_ :: Parser [ByteString]
 parseStringLit_ = go
   where
     go :: Parser [ByteString]
-    go input = do
-      let (xs, ys) = B.break (\c -> c == ord '"' || c == ord '\\') input
-      case B.uncons ys of
-        Just (z, zs) -> do
-          let cont
-                | z == ord '"' = Just ([xs], zs)
-                | z == ord '\\' = xs <:> unescape zs
-          cont
-        Nothing -> Nothing
+    go = do
+      xs <- breakP (\w -> w == ord '"' || w == ord '\\')
+      z  <- nextWord
+      case z of
+        w | w == ord '"'  -> return [xs]
+          | w == ord '\\' -> xs <:> unescape
 
     unescape :: Parser [ByteString]
-    unescape input = do
-      (x, xs) <- B.uncons input
-      let cont
-            | x == ord 'u' = unescapeUnicode xs
-            | x == ord 'b' = "\b" <:> go xs
-            | x == ord 'f' = "\f" <:> go xs
-            | x == ord 'n' = "\n" <:> go xs
-            | x == ord 'r' = "\r" <:> go xs
-            | x == ord 't' = "\t" <:> go xs
-            | otherwise = B.pack [x] <:> go xs
-      cont
+    unescape = do
+      x <- nextWord
+      case x of
+        w | w == ord 'u' -> unescapeUnicode
+          | w == ord 'b' -> "\b" <:> go
+          | w == ord 'f' -> "\f" <:> go
+          | w == ord 'n' -> "\n" <:> go
+          | w == ord 'r' -> "\r" <:> go
+          | w == ord 't' -> "\t" <:> go
+          | otherwise    -> B.singleton x <:> go
 
     unescapeUnicode :: Parser [ByteString]
-    unescapeUnicode input = do
+    unescapeUnicode = do
       -- FIXME: Make tihs more efficient
-      let (xs, ys) = B.splitAt 4 input
+      xs <- splitAtP 4
       case readHex (B8.unpack xs) of
-        [(n, "")] -> (encodeUtf8 $ T.pack [Char.chr n]) <:> go ys
-        _ -> Nothing
-
-    (<:>) :: ByteString -> Maybe ([ByteString], ByteString) -> Maybe ([ByteString], ByteString)
-    xs <:> ys = mapFst (xs :) <$> ys
+        [(n, "")] -> (encodeUtf8 $ T.pack [Char.chr n]) <:> go
+        _         -> failP
 
 -- FIXME: This is not correct yet..
 parseNumber :: Parser Value
-parseNumber input = case B.span (\x -> ord '0' <= x && x <= ord '9') input of
-  (xs, rest) | (not . B.null) xs -> Just ((Number . read . B8.unpack) xs, rest)
-  _ -> Nothing
+parseNumber = do
+  xs <- spanP $ \x -> ord '0' <= x && x <= ord '9'
+  case B.null xs of
+    True  -> failP
+    False -> return . Number . read $ B8.unpack xs
 
+-- maybe there's a more efficient way to go than toJSON,
+-- for the [Value] -> Value phase
+-- ?
 parseArray :: Parser Value
-parseArray = fmap (mapFst toJSON) . go
+parseArray = fmap toJSON go
   where
     go :: Parser [Value]
-    go input = do
-      (value, rest) <- parseValue input
-      case B.uncons rest of
-        Just (y, ys) -> do
-          let cont
-                | y == ord ']' = return ([value], ys)
-                | y == ord ',' = do
-                    (zs, rest_) <- go ys
-                    return (value : zs, rest_)
-                | otherwise = Nothing
-          cont
-        Nothing -> Nothing
+    go = do
+      value <- parseValue
+      x <- nextWord
+      case x of
+        w | w == ord ']' -> return [value]
+          | w == ord ',' -> fmap (value:) go
+          | otherwise    -> failP
 
 parseObject :: Parser Value
-parseObject = fmap (mapFst object) . go
+parseObject = fmap object go
   where
-    go :: ByteString -> Maybe ([Pair], ByteString)
-    go input = do
-      (name, rest) <- parseName input
-      (x, xs) <- B.uncons rest
-      let cont
-            | x == ord ':' = do
-                (value, r) <- parseValue xs
-                (z, zs) <- B.uncons r
-                let cont_
-                      | z == ord ',' = mapFst ((name .= value) :) <$> go zs
-                      | z == ord '}' = return ([name .= value], zs)
-                      | otherwise = Nothing
-                cont_
-            | otherwise = Nothing
-      cont
+    go :: Parser [Pair]
+    go = do
+      name <- parseName
+      x <- nextWord
+      case x of
+        w | w == ord ':' -> do
+              value <- parseValue
+              z <- nextWord
+              case z of
+                z' | z' == ord ',' -> (name .= value) <:> go
+                   | z' == ord '}' -> return [name .= value]
+                   | otherwise     -> failP
+
+          | otherwise -> failP
 
     parseName :: Parser Text
-    parseName input = do
-      (x, xs) <- B.uncons input
-      let cont
-            | x == ord '"' = parseStringLit xs
-            | otherwise = Nothing
-      cont
+    parseName = do
+      x <- nextWord
+      if x == ord '"'
+        then parseStringLit
+        else failP
 
 ord :: Char -> Word8
 ord = fromIntegral . Char.ord
 
-mapFst :: (a -> b) -> (a, c) -> (b, c)
-mapFst f (a, b) = (f a, b)
+-- b <:> p = fmap (b:) p
+(<:>) :: a -> Parser [a] -> Parser [a]
+b <:> p = fmap (b:) p

@@ -16,7 +16,7 @@ aesonStricter :: ByteString -> Maybe Value
 aesonStricter = Aeson.decodeStrict'
 
 js :: ByteString -> Maybe Value
-js = fmap fst . JS.parseValue
+js = JS.decodeValue
 
 benchOnBS :: Label -> ByteString -> Benchmark
 benchOnBS label str =
