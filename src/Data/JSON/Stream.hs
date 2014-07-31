@@ -1,5 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Data.JSON.Stream (parseValue, decode, decodeValue) where
+module Data.JSON.Stream
+  ( parseValue
+  , decode
+  , decodeValue
+  , runParser
+  , result
+  , Result(..)
+  ) where
 
 import           Control.Applicative
 import           Numeric (readHex)
@@ -19,9 +26,9 @@ data Result a = OK !a ByteString
               | Failed
   deriving (Eq, Show)
 
-result :: b -> (a -> b) -> Result a -> b
+result :: b -> (a -> ByteString -> b) -> Result a -> b
 result def _ Failed   = def
-result _   f (OK x s) = f x
+result _   f (OK x s) = f x s
 
 newtype Parser a = Parser
   { runParser :: ByteString -> Result a }
@@ -33,7 +40,7 @@ decodeValue :: ByteString -> Maybe Value
 decodeValue = decode parseValue
 
 decode :: Parser a -> ByteString -> Maybe a
-decode p = result Nothing Just
+decode p = result Nothing (\x _ -> Just x)
          . runParser p
 
 instance Functor Parser where
@@ -60,6 +67,8 @@ instance Monad Parser where
     case runParser x str of
       Failed    -> Failed
       OK a str' -> runParser (f a) str'
+
+  fail _ = failP
 
 nextWord :: Parser Word8
 nextWord = Parser $ \str ->

@@ -16,6 +16,8 @@ source-repository head
 library
   ghc-options:
       -Wall -O2
+  ghc-prof-options:
+      -Wall -O2 -prof -auto
   hs-source-dirs:
       src
   exposed-modules:
@@ -54,5 +56,16 @@ benchmark vs-aeson
     , bytestring >= 0.10
     , criterion
     , filepath
+    , json-stream
+  default-language:  Haskell2010
+
+executable js-profile
+  main-is:           js-profile.hs
+  hs-source-dirs:    prof
+  ghc-options:       -O2 -rtsopts
+  ghc-prof-options:  -O2 -prof -auto -rtsopts
+  build-depends:
+      base >= 4 && < 5
+    , bytestring >= 0.10
     , json-stream
   default-language:  Haskell2010
