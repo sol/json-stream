@@ -28,17 +28,19 @@ benchOnBS label str =
 
 main :: IO ()
 main = do
-  users20    <- file "users_20.json"
-  users200   <- file "users_200.json"
-  users2000  <- file "users_2000.json"
-  users20000 <- file "users_20000.json"
+  users20     <- file "users_20.json"
+  users200    <- file "users_200.json"
+  users2000   <- file "users_2000.json"
+  users20000  <- file "users_20000.json"
+  users200000 <- file "users_200000.json"
 
   defaultMain
     [ bgroup "users"
-        [ benchOnBS "20"    users20
-        , benchOnBS "200"   users200
-        , benchOnBS "2000"  users2000
-        , benchOnBS "20000" users20000
+        [ benchOnBS "20"     users20
+        , benchOnBS "200"    users200
+        , benchOnBS "2000"   users2000
+        , benchOnBS "20000"  users20000
+        , benchOnBS "200000" users200000
         ]
     ]
 
