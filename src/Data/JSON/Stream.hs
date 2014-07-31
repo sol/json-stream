@@ -15,9 +15,9 @@ import           Data.Text.Encoding (encodeUtf8, decodeUtf8')
 import           Data.Aeson (Value(..), toJSON, object, (.=))
 import           Data.Aeson.Types (Pair)
 
-type Parser = ByteString -> Maybe (Value, ByteString)
+type Parser a = ByteString -> Maybe (a, ByteString)
 
-parseValue :: Parser
+parseValue :: Parser Value
 parseValue = go
   where
     go input = do
@@ -32,34 +32,34 @@ parseValue = go
             | otherwise = parseNumber input
       cont
 
-parseNull :: Parser
+parseNull :: Parser Value
 parseNull input = case B.splitAt 3 input of
   ("ull", rest) -> Just (Null, rest)
   _ -> Nothing
 
-parseTrue :: Parser
+parseTrue :: Parser Value
 parseTrue input = case B.splitAt 3 input of
   ("rue", rest) -> Just (Bool True, rest)
   _ -> Nothing
 
-parseFalse :: Parser
+parseFalse :: Parser Value
 parseFalse input = case B.splitAt 4 input of
   ("alse", rest) -> Just (Bool False, rest)
   _ -> Nothing
 
-parseString :: Parser
+parseString :: Parser Value
 parseString = fmap (mapFst String) . parseStringLit
 
-parseStringLit :: ByteString -> Maybe (Text, ByteString)
+parseStringLit :: Parser Text
 parseStringLit input = do
   (str, rest) <- parseStringLit_ input
   str_ <- (either (const Nothing) Just . decodeUtf8' . B.concat) str
   return (str_, rest)
 
-parseStringLit_ :: ByteString -> Maybe ([ByteString], ByteString)
+parseStringLit_ :: Parser [ByteString]
 parseStringLit_ = go
   where
-    go :: ByteString -> Maybe ([ByteString], ByteString)
+    go :: Parser [ByteString]
     go input = do
       let (xs, ys) = B.break (\c -> c == ord '"' || c == ord '\\') input
       case B.uncons ys of
@@ -70,7 +70,7 @@ parseStringLit_ = go
           cont
         Nothing -> Nothing
 
-    unescape :: ByteString -> Maybe ([ByteString], ByteString)
+    unescape :: Parser [ByteString]
     unescape input = do
       (x, xs) <- B.uncons input
       let cont
@@ -83,7 +83,7 @@ parseStringLit_ = go
             | otherwise = B.pack [x] <:> go xs
       cont
 
-    unescapeUnicode :: ByteString -> Maybe ([ByteString], ByteString)
+    unescapeUnicode :: Parser [ByteString]
     unescapeUnicode input = do
       -- FIXME: Make tihs more efficient
       let (xs, ys) = B.splitAt 4 input
@@ -95,15 +95,15 @@ parseStringLit_ = go
     xs <:> ys = mapFst (xs :) <$> ys
 
 -- FIXME: This is not correct yet..
-parseNumber :: Parser
+parseNumber :: Parser Value
 parseNumber input = case B.span (\x -> ord '0' <= x && x <= ord '9') input of
   (xs, rest) | (not . B.null) xs -> Just ((Number . read . B8.unpack) xs, rest)
   _ -> Nothing
 
-parseArray :: Parser
+parseArray :: Parser Value
 parseArray = fmap (mapFst toJSON) . go
   where
-    go :: ByteString -> Maybe ([Value], ByteString)
+    go :: Parser [Value]
     go input = do
       (value, rest) <- parseValue input
       case B.uncons rest of
@@ -117,7 +117,7 @@ parseArray = fmap (mapFst toJSON) . go
           cont
         Nothing -> Nothing
 
-parseObject :: Parser
+parseObject :: Parser Value
 parseObject = fmap (mapFst object) . go
   where
     go :: ByteString -> Maybe ([Pair], ByteString)
@@ -136,7 +136,7 @@ parseObject = fmap (mapFst object) . go
             | otherwise = Nothing
       cont
 
-    parseName :: ByteString -> Maybe (Text, ByteString)
+    parseName :: Parser Text
     parseName input = do
       (x, xs) <- B.uncons input
       let cont
