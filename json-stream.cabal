@@ -15,7 +15,7 @@ source-repository head
 
 library
   ghc-options:
-      -Wall
+      -Wall -O2
   hs-source-dirs:
       src
   exposed-modules:
@@ -46,7 +46,7 @@ test-suite spec
 benchmark vs-aeson
   main-is:           vs-aeson.hs
   hs-source-dirs:    bench
-  ghc-options:       -O2 -funbox-strict-fields
+  ghc-options:       -O2
   type:              exitcode-stdio-1.0
   build-depends:
       base >= 4 && < 5
