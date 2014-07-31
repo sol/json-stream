@@ -50,7 +50,6 @@ parseFalse input = case B.splitAt 4 input of
 parseString :: Parser
 parseString = fmap (mapFst String) . parseStringLit
 
--- FIXME: This is not correct yet..
 parseStringLit :: ByteString -> Maybe (Text, ByteString)
 parseStringLit input = do
   (str, rest) <- parseStringLit_ input
