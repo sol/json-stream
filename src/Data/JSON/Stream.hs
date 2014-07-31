@@ -2,13 +2,16 @@
 module Data.JSON.Stream (parseValue) where
 
 import           Control.Applicative
+import           Numeric (readHex)
+import           Data.Word (Word8)
 import qualified Data.Char as Char
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as B8
 
+import qualified Data.Text as T
 import           Data.Text (Text)
-import           Data.Text.Encoding (decodeUtf8')
+import           Data.Text.Encoding (encodeUtf8, decodeUtf8')
 import           Data.Aeson (Value(..), toJSON, object, (.=))
 import           Data.Aeson.Types (Pair)
 
@@ -49,10 +52,48 @@ parseString = fmap (mapFst String) . parseStringLit
 
 -- FIXME: This is not correct yet..
 parseStringLit :: ByteString -> Maybe (Text, ByteString)
-parseStringLit input = case B.break (== ord '"') input of
-  (s, rest) -> do
-    s_ <- either (const Nothing) Just (decodeUtf8' s)
-    return (s_, B.drop 1 rest)
+parseStringLit input = do
+  (str, rest) <- parseStringLit_ input
+  str_ <- (either (const Nothing) Just . decodeUtf8' . B.concat) str
+  return (str_, rest)
+
+parseStringLit_ :: ByteString -> Maybe ([ByteString], ByteString)
+parseStringLit_ = go
+  where
+    go :: ByteString -> Maybe ([ByteString], ByteString)
+    go input = do
+      let (xs, ys) = B.break (\c -> c == ord '"' || c == ord '\\') input
+      case B.uncons ys of
+        Just (z, zs) -> do
+          let cont
+                | z == ord '"' = Just ([xs], zs)
+                | z == ord '\\' = xs <:> unescape zs
+          cont
+        Nothing -> Nothing
+
+    unescape :: ByteString -> Maybe ([ByteString], ByteString)
+    unescape input = do
+      (x, xs) <- B.uncons input
+      let cont
+            | x == ord 'u' = unescapeUnicode xs
+            | x == ord 'b' = "\b" <:> go xs
+            | x == ord 'f' = "\f" <:> go xs
+            | x == ord 'n' = "\n" <:> go xs
+            | x == ord 'r' = "\r" <:> go xs
+            | x == ord 't' = "\t" <:> go xs
+            | otherwise = B.pack [x] <:> go xs
+      cont
+
+    unescapeUnicode :: ByteString -> Maybe ([ByteString], ByteString)
+    unescapeUnicode input = do
+      -- FIXME: Make tihs more efficient
+      let (xs, ys) = B.splitAt 4 input
+      case readHex (B8.unpack xs) of
+        [(n, "")] -> (encodeUtf8 $ T.pack [Char.chr n]) <:> go ys
+        _ -> Nothing
+
+    (<:>) :: ByteString -> Maybe ([ByteString], ByteString) -> Maybe ([ByteString], ByteString)
+    xs <:> ys = mapFst (xs :) <$> ys
 
 -- FIXME: This is not correct yet..
 parseNumber :: Parser
@@ -104,7 +145,7 @@ parseObject = fmap (mapFst object) . go
             | otherwise = Nothing
       cont
 
-ord :: Integral a => Char -> a
+ord :: Char -> Word8
 ord = fromIntegral . Char.ord
 
 mapFst :: (a -> b) -> (a, c) -> (b, c)
