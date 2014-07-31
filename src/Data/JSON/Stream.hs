@@ -105,14 +105,14 @@ parseArray = fmap (mapFst toJSON) . go
   where
     go :: ByteString -> Maybe ([Value], ByteString)
     go input = do
-      (xs, rest) <- parseValue input
+      (value, rest) <- parseValue input
       case B.uncons rest of
         Just (y, ys) -> do
           let cont
-                | y == ord ']' = return ([xs], ys)
+                | y == ord ']' = return ([value], ys)
                 | y == ord ',' = do
                     (zs, rest_) <- go ys
-                    return (xs : zs, rest_)
+                    return (value : zs, rest_)
                 | otherwise = Nothing
           cont
         Nothing -> Nothing
