@@ -76,6 +76,19 @@ nextWord = Parser $ \str ->
     Nothing        -> Failed
     Just (c, str') -> OK c str'
 
+notRelevant :: Word8 -> Bool
+notRelevant w
+  | w == ord ' '  = True
+  | w == ord '\t' = True
+  | w == ord '\n' = True
+  | otherwise     = False
+
+nextRelevantWord :: Parser Word8
+nextRelevantWord = Parser $ \str ->
+  case B.uncons $ B.dropWhile notRelevant str of
+    Nothing        -> Failed
+    Just (w, str') -> OK w str'
+
 splitAtP :: Int -> Parser ByteString
 splitAtP n = Parser $ \str ->
   case B.splitAt n str of
@@ -93,7 +106,7 @@ spanP p = Parser $ \input ->
 
 parseValue :: Parser Value
 parseValue = Parser $ \str ->
-  case runParser nextWord str of
+  case runParser nextRelevantWord str of
     OK x str'
         | x == ord '{' -> runParser parseObject str'
         | x == ord '[' -> runParser parseArray str'
@@ -103,7 +116,7 @@ parseValue = Parser $ \str ->
         | x == ord 'n' -> runParser parseNull str'
         -- here we run the parser on the original bs we got
         -- because we don't want to miss the first digit
-        | otherwise    -> runParser parseNumber str
+        | otherwise    -> runParser parseNumber (B.cons x str')
     Failed -> Failed
 
 parseNull :: Parser Value
@@ -188,7 +201,7 @@ parseArray = fmap toJSON go
     go :: Parser [Value]
     go = do
       value <- parseValue
-      x <- nextWord
+      x <- nextRelevantWord
       case x of
         w | w == ord ']' -> return [value]
           | w == ord ',' -> fmap (value:) go
@@ -200,11 +213,11 @@ parseObject = fmap object go
     go :: Parser [Pair]
     go = do
       name <- parseName
-      x <- nextWord
+      x <- nextRelevantWord
       case x of
         w | w == ord ':' -> do
               value <- parseValue
-              z <- nextWord
+              z <- nextRelevantWord
               case z of
                 z' | z' == ord ',' -> (name .= value) <:> go
                    | z' == ord '}' -> return [name .= value]
@@ -214,7 +227,7 @@ parseObject = fmap object go
 
     parseName :: Parser Text
     parseName = do
-      x <- nextWord
+      x <- nextRelevantWord
       if x == ord '"'
         then parseStringLit
         else failP

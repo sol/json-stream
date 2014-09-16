@@ -17,7 +17,7 @@ library
   ghc-options:
       -Wall -O2
   ghc-prof-options:
-      -Wall -O2 -prof -auto
+      -Wall -O2 -prof -auto-all
   hs-source-dirs:
       src
   exposed-modules:

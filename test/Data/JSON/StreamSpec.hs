@@ -24,6 +24,9 @@ spec = do
     it "parses number" $ do
       decodeValue "23" `shouldBe` Just (Number 23)
 
+    it "parses a number surrounded by whitespaces" $
+      decodeValue "   23   " `shouldBe` Just (Number 23)
+
     it "parses arrays" $ do
       decodeValue "[true,false,null]" `shouldBe`
         Just (toJSON [toJSON True, toJSON False, Null])
@@ -31,6 +34,10 @@ spec = do
     it "parses objects" $ do
       decodeValue "{\"foo\":23,\"bar\":42}" `shouldBe`
         Just (object ["foo" .= Number 23, "bar" .= Number 42])
+
+    it "parses objects with whitespaces/newlines sprinkled all around" $
+      decodeValue "{\n \"x\" : 23, \n \"y\" : 11, \n \"name\" :\t \"Bob\" \n } " `shouldBe`
+        Just (object ["x" .= Number 23, "y" .= Number 11, "name" .= String "Bob"])
 
     context "when parsing strings" $ do
       it "parses simple strings" $ do
